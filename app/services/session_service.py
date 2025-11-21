@@ -1,34 +1,36 @@
-from sqlalchemy.orm import Session
-from uuid import uuid4
 from datetime import datetime, timedelta
-from typing import List, Optional
+from sqlalchemy.orm import Session as DBSession
 
-from app.repository import session_repository
 from app.schemas.session import SessionCreate
 from app.models.session import Session as SessionModel
+from app.repository.session_repository import SessionRepository
+from fastapi import HTTPException
 
-# හෝයම්: session id generate කිරීම
-def _generate_session_id() -> str:
-    return uuid4().hex
+class SessionService:
+    def __init__(self, db: DBSession):
+        self.db = db
+        self.session_repo = SessionRepository(db)
 
-def list_sessions(db: Session, skip: int = 0, limit: int = 100) -> List[SessionModel]:
-    return session_repository.list_sessions(db, skip, limit)
+    def create_session(self, session_data: SessionCreate) -> SessionModel:
+        return self.session_repo.create_session(session_data)
 
-def get_session_by_id(db: Session, session_id: int) -> Optional[SessionModel]:
-    return session_repository.get_session_by_id(db, session_id)
+    def validate_session(self, session_id: str) -> SessionModel:
+        if not session_id:
+            raise HTTPException(status_code=400, detail="Session ID is required")
 
-def get_session_by_sid(db: Session, sid: str) -> Optional[SessionModel]:
-    return session_repository.get_session_by_session_id(db, sid)
+        session = self.session_repo.get_session_by_id(session_id)
 
-def create_new_session(db: Session, session_in: SessionCreate, ttl_minutes: Optional[int] = None) -> SessionModel:
-    sid = _generate_session_id()
-    expires_at = None
-    if ttl_minutes:
-        expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
-    return session_repository.create_session(db, session_in, session_id=sid, expires_at=expires_at)
+        if not session:
+            raise HTTPException(status_code=401, detail="Invalid session")
 
-def touch_session(db: Session, session_obj: SessionModel) -> SessionModel:
-    return session_repository.update_last_active(db, session_obj)
+        if session.expires_at and session.expires_at < datetime.utcnow():
+            raise HTTPException(status_code=401, detail="Session expired")
 
-def remove_session(db: Session, session_id: int) -> bool:
-    return session_repository.delete_session(db, session_id)
+        return self.session_repo.update_session_activity(session)
+
+    def is_session_valid(self, session_id: str) -> bool:
+        try:
+            self.validate_session(session_id)
+            return True
+        except HTTPException:
+            return False

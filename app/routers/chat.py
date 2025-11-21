@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DBSession
 
-from app.core.loggers import logger
+from app.core.logger import logger
 from app.db.dbconnection import get_db
 from app.schemas.chat_schema import ChatRequest, ChatResponse, ChatMessageOut
 from app.services.chatbot_service import ChatService
-from app.services.session_services import SessionService
+from app.services.session_service import SessionService
 from app.schemas.session import SessionCreate
 
 router = APIRouter(prefix="/api/chat", tags=["Chat"])

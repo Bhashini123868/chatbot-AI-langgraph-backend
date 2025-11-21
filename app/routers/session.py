@@ -1,41 +1,36 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Request, HTTPException
+from sqlalchemy.orm import Session as DBSession
 
+from app.core.logger import logger
 from app.db.dbconnection import get_db
 from app.schemas.session import SessionCreate, SessionResponse
-from app.services import session_service
+from app.services.session_service import SessionService
 
-router = APIRouter()
+router = APIRouter(prefix="/api/session", tags=["Session"])
 
-@router.get("/", response_model=List[SessionResponse])
-def read_sessions(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    return session_service.list_sessions(db, skip, limit)
+@router.post("/create", response_model=SessionResponse)
+async def create_session(
+    request: Request,
+    db: DBSession = Depends(get_db)
+):
+    try:
+        session_service = SessionService(db)
 
-@router.get("/id/{id}", response_model=SessionResponse)
-def read_session_by_id(id: int, db: Session = Depends(get_db)):
-    obj = session_service.get_session_by_id(db, id)
-    if not obj:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return obj
+        ip_address = request.client.host if request.client else None
+        user_agent = request.headers.get("user-agent", "unknown")
 
-@router.get("/sid/{session_id}", response_model=SessionResponse)
-def read_session_by_sid(session_id: str, db: Session = Depends(get_db)):
-    obj = session_service.get_session_by_sid(db, session_id)
-    if not obj:
-        raise HTTPException(status_code=404, detail="Session not found")
-    # update last_active on read (optional)
-    session_service.touch_session(db, obj)
-    return obj
+        session_data = SessionCreate(
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
 
-@router.post("/", response_model=SessionResponse, status_code=201)
-def create_session(session_in: SessionCreate, db: Session = Depends(get_db), ttl_minutes: Optional[int] = Query(None, description="optional TTL in minutes")):
-    obj = session_service.create_new_session(db, session_in, ttl_minutes)
-    return obj
+        new_session = session_service.create_session(session_data)
 
-@router.delete("/{id}", status_code=204)
-def delete_session(id: int, db: Session = Depends(get_db)):
-    ok = session_service.remove_session(db, id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return
+        logger.info(f"Explicitly created new session: {new_session.session_id}")
+
+        return SessionResponse.from_orm(new_session)
+    except Exception as e:
+
+        logger.error(f"Unhandled error in create_session: {e}", exc_info=True)
+
+        raise HTTPException(status_code=500, detail=str(e))
